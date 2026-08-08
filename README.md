@@ -18,8 +18,9 @@ que consome esta API fica em um repositório separado (`pgl_auth`).
     - `POST /api/login` — valida matrícula/senha (hash bcrypt) contra `pgl_auth.students`
       no Postgres (Neon) e assina o JWT.
     - `POST /api/register` — cadastra um novo aluno (matrícula + senha) em
-      `pgl_auth.students`, com a senha já hasheada em bcrypt. Retorna `409` se a matrícula
-      já existir.
+      `pgl_auth.students`, com a senha já hasheada em bcrypt. Só permite o cadastro se a
+      matrícula existir e estiver ativa em `pgl_proxy.students` (`403` caso contrário).
+      Retorna `409` se a matrícula já existir em `pgl_auth.students`.
   - `core/db.py` — conexão com o Postgres (`get_connection()`).
   - `core/security.py` — hashing/verificação de senha (bcrypt) e o fingerprint SHA-256
     usado só para correlacionar tentativas nos logs, sem nunca expor a senha.

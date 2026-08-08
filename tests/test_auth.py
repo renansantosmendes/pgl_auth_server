@@ -98,7 +98,7 @@ def test_login_missing_fields(client):
 
 
 def test_register_success(client, monkeypatch):
-    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection(None))
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection((True,)))
 
     response = client.post(
         "/api/register", json={"matricula": "12345", "senha": "new-password"}
@@ -111,9 +111,31 @@ def test_register_success(client, monkeypatch):
     }
 
 
+def test_register_matricula_not_enrolled(client, monkeypatch):
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection(None))
+
+    response = client.post(
+        "/api/register", json={"matricula": "does-not-exist", "senha": "new-password"}
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Matrícula não encontrada ou inativa na disciplina."
+
+
+def test_register_matricula_inactive_in_proxy(client, monkeypatch):
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection((False,)))
+
+    response = client.post(
+        "/api/register", json={"matricula": "12345", "senha": "new-password"}
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Matrícula não encontrada ou inativa na disciplina."
+
+
 def test_register_duplicate_matricula(client, monkeypatch):
-    connection = _mock_connection(None)
-    connection.cursor.return_value.execute.side_effect = psycopg2.errors.UniqueViolation
+    connection = _mock_connection((True,))
+    connection.cursor.return_value.execute.side_effect = [None, psycopg2.errors.UniqueViolation]
     monkeypatch.setattr(db, "get_connection", lambda: connection)
 
     response = client.post(

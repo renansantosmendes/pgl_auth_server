@@ -92,20 +92,36 @@ def register(payload: RegisterRequest) -> RegisterResponse:
 
     password_hash = security.hash_password(payload.senha)
 
-    try:
-        with db.get_connection() as conn:
-            with conn.cursor() as cur:
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT is_active FROM pgl_proxy.students WHERE matricula = %s",
+                (payload.matricula,),
+            )
+            proxy_row = cur.fetchone()
+
+            if proxy_row is None or not proxy_row[0]:
+                logger.warning(
+                    "Registration denied: matricula not enrolled/active in pgl_proxy | matricula=%s",
+                    payload.matricula,
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="Matrícula não encontrada ou inativa na disciplina.",
+                )
+
+            try:
                 cur.execute(
                     "INSERT INTO pgl_auth.students (matricula, password_hash, is_active) "
                     "VALUES (%s, %s, TRUE)",
                     (payload.matricula, password_hash),
                 )
-    except psycopg2.errors.UniqueViolation:
-        logger.warning(
-            "Registration denied: matricula already exists | matricula=%s",
-            payload.matricula,
-        )
-        raise HTTPException(status_code=409, detail="Matrícula já cadastrada.")
+            except psycopg2.errors.UniqueViolation:
+                logger.warning(
+                    "Registration denied: matricula already exists | matricula=%s",
+                    payload.matricula,
+                )
+                raise HTTPException(status_code=409, detail="Matrícula já cadastrada.")
 
     logger.info("Registration successful | matricula=%s", payload.matricula)
     return RegisterResponse(matricula=payload.matricula)
