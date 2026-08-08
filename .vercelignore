@@ -1,5 +1,6 @@
 tests/
 .github/
+requirements.txt
 requirements-dev.txt
 README.md
 .env.example

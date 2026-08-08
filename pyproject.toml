@@ -1,2 +1,14 @@
+[project]
+name = "pgl-auth-server"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.0",
+    "psycopg2-binary==2.9.9",
+    "bcrypt==4.2.0",
+    "PyJWT==2.9.0",
+    "pydantic==2.9.2",
+]
+
 [tool.vercel]
 entrypoint = "api.login:app"

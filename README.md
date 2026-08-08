@@ -12,10 +12,14 @@ que consome esta API fica em um repositório separado (`pgl_auth`).
 - `api/login.py` — função serverless com o endpoint `POST /api/login`. Valida matrícula/senha
   (hash bcrypt) contra `pgl_auth.students` no Postgres (Neon) e assina o JWT.
 - `requirements.txt` — dependências da função (fastapi, psycopg2-binary, bcrypt, PyJWT, pydantic).
-- `pyproject.toml` — **não é o pacote PyPI**, só declara `[tool.vercel] entrypoint` para a
-  Vercel achar `api/login.py`. Não adicione `[project]`/dependências aqui: a Vercel prioriza
-  o `pyproject.toml` sobre o `requirements.txt` quando ambos declaram dependências, o que
-  quebra a instalação de `bcrypt`/`fastapi`/etc. em runtime.
+- `pyproject.toml` — **não é o pacote PyPI**. Declara `[tool.vercel] entrypoint` (para a
+  Vercel achar `api/login.py`) e `[project]`/`dependencies`, que é a fonte de verdade das
+  dependências no deploy: o build da Vercel usa `uv` e falha com `No project table found`
+  se o `pyproject.toml` existir sem uma tabela `[project]`. `requirements.txt` e
+  `requirements-dev.txt` existem só para desenvolvimento local/CI e ficam de fora do bundle
+  (`.vercelignore`) para não conflitar com o `pyproject.toml` durante o `uv lock`.
+- `uv.lock` — lockfile commitado para builds determinísticos na Vercel. Regenere com
+  `uv lock` sempre que alterar `dependencies` em `pyproject.toml`.
 
 ## Rodando localmente
 
