@@ -9,12 +9,25 @@ que consome esta API fica em um repositório separado (`pgl_auth`).
 
 ## Estrutura
 
-- `api/login.py` — função serverless com o endpoint `POST /api/login`. Valida matrícula/senha
-  (hash bcrypt) contra `pgl_auth.students` no Postgres (Neon) e assina o JWT.
+- `api/application.py` — entrypoint serverless usado pela Vercel (`[tool.vercel] entrypoint`
+  em `pyproject.toml` aponta para cá). Só monta a `FastAPI app` a partir de `core/app.py`;
+  não tem lógica de negócio.
+- `core/` — lógica da aplicação, organizada por responsabilidade:
+  - `core/app.py` — factory `create_app()` que instancia a `FastAPI` e registra as rotas.
+  - `core/routers/auth.py` — endpoints de autenticação:
+    - `POST /api/login` — valida matrícula/senha (hash bcrypt) contra `pgl_auth.students`
+      no Postgres (Neon) e assina o JWT.
+    - `POST /api/register` — cadastra um novo aluno (matrícula + senha) em
+      `pgl_auth.students`, com a senha já hasheada em bcrypt. Retorna `409` se a matrícula
+      já existir.
+  - `core/db.py` — conexão com o Postgres (`get_connection()`).
+  - `core/security.py` — hashing/verificação de senha (bcrypt) e o fingerprint SHA-256
+    usado só para correlacionar tentativas nos logs, sem nunca expor a senha.
+  - `core/config.py` — configuração de logging e constantes (`TOKEN_TTL`).
 - `requirements.txt` — dependências da função (fastapi, psycopg2-binary, bcrypt, PyJWT, pydantic).
 - `pyproject.toml` — **não é o pacote PyPI**. Declara `[tool.vercel] entrypoint` (para a
-  Vercel achar `api/login.py`) e `[project]`/`dependencies`, que é a fonte de verdade das
-  dependências no deploy: o build da Vercel usa `uv` e falha com `No project table found`
+  Vercel achar `api/application.py`) e `[project]`/`dependencies`, que é a fonte de verdade
+  das dependências no deploy: o build da Vercel usa `uv` e falha com `No project table found`
   se o `pyproject.toml` existir sem uma tabela `[project]`. `requirements.txt` e
   `requirements-dev.txt` existem só para desenvolvimento local/CI e ficam de fora do bundle
   (`.vercelignore`) para não conflitar com o `pyproject.toml` durante o `uv lock`.
@@ -26,7 +39,7 @@ que consome esta API fica em um repositório separado (`pgl_auth`).
 ```bash
 pip install -r requirements.txt fastapi[standard]  # uvicorn vem com o extra "standard"
 cp .env.example .env   # preencha NEON_DATABASE_URL e JWT_SECRET_KEY
-fastapi dev api/login.py
+fastapi dev api/application.py
 ```
 
 ## Deploy no Vercel
@@ -37,7 +50,8 @@ fastapi dev api/login.py
 3. Configure as variáveis de ambiente do projeto:
    - `NEON_DATABASE_URL`
    - `JWT_SECRET_KEY`
-4. Deploy automático a cada push — o endpoint fica em `https://<projeto>.vercel.app/api/login`.
+4. Deploy automático a cada push — os endpoints ficam em
+   `https://<projeto>.vercel.app/api/login` e `https://<projeto>.vercel.app/api/register`.
 5. Depois do primeiro deploy, atualize `DEFAULT_API_URL` em `pgl_auth/src/pgl_auth/client.py`
    (no outro repositório) com essa URL, ou oriente os alunos a definir a variável de
    ambiente `PGL_AUTH_API_URL`.
@@ -48,6 +62,6 @@ Não é preciso `vercel.json`: declarar `runtime` manualmente lá costuma quebra
 ## Banco de dados
 
 O schema `pgl_auth` (tabela `students`) e o schema `pgl_proxy` (tabela `students`, que
-guarda quem está matriculado/ativo) são provisionados e administrados a partir do
-repositório `pgl_auth` (`db/migrate.py`, `db/create_student.py`). Esta API só lê/autentica
-contra `pgl_auth.students` — não faz nenhuma escrita administrativa.
+guarda quem está matriculado/ativo) são provisionados a partir do repositório `pgl_auth`
+(`db/migrate.py`). O cadastro de alunos (`db/create_student.py` naquele repositório, ou
+`POST /api/register` aqui) escreve em `pgl_auth.students`.

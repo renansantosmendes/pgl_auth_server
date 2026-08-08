@@ -2,10 +2,13 @@ from unittest.mock import MagicMock
 
 import bcrypt
 import jwt
+import psycopg2
 import pytest
 from fastapi.testclient import TestClient
 
-from api import login
+from api.application import app
+from core import db
+from core.config import TOKEN_TTL
 
 
 @pytest.fixture(autouse=True)
@@ -16,7 +19,7 @@ def env(monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(login.app)
+    return TestClient(app)
 
 
 def _mock_connection(fetchone_result):
@@ -38,9 +41,7 @@ def _password_hash(password: str) -> str:
 
 def test_login_success(client, monkeypatch):
     password_hash = _password_hash("correct-password")
-    monkeypatch.setattr(
-        login, "_get_connection", lambda: _mock_connection((password_hash, True))
-    )
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection((password_hash, True)))
 
     response = client.post(
         "/api/login", json={"matricula": "12345", "senha": "correct-password"}
@@ -49,14 +50,14 @@ def test_login_success(client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["token_type"] == "bearer"
-    assert body["expires_in"] == int(login.TOKEN_TTL.total_seconds())
+    assert body["expires_in"] == int(TOKEN_TTL.total_seconds())
 
     decoded = jwt.decode(body["access_token"], "test-secret", algorithms=["HS256"])
     assert decoded["sub"] == "12345"
 
 
 def test_login_unknown_matricula(client, monkeypatch):
-    monkeypatch.setattr(login, "_get_connection", lambda: _mock_connection(None))
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection(None))
 
     response = client.post(
         "/api/login", json={"matricula": "does-not-exist", "senha": "whatever"}
@@ -68,9 +69,7 @@ def test_login_unknown_matricula(client, monkeypatch):
 
 def test_login_wrong_password(client, monkeypatch):
     password_hash = _password_hash("correct-password")
-    monkeypatch.setattr(
-        login, "_get_connection", lambda: _mock_connection((password_hash, True))
-    )
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection((password_hash, True)))
 
     response = client.post(
         "/api/login", json={"matricula": "12345", "senha": "wrong-password"}
@@ -82,9 +81,7 @@ def test_login_wrong_password(client, monkeypatch):
 
 def test_login_inactive_student(client, monkeypatch):
     password_hash = _password_hash("correct-password")
-    monkeypatch.setattr(
-        login, "_get_connection", lambda: _mock_connection((password_hash, False))
-    )
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection((password_hash, False)))
 
     response = client.post(
         "/api/login", json={"matricula": "12345", "senha": "correct-password"}
@@ -96,5 +93,38 @@ def test_login_inactive_student(client, monkeypatch):
 
 def test_login_missing_fields(client):
     response = client.post("/api/login", json={"matricula": "12345"})
+
+    assert response.status_code == 422
+
+
+def test_register_success(client, monkeypatch):
+    monkeypatch.setattr(db, "get_connection", lambda: _mock_connection(None))
+
+    response = client.post(
+        "/api/register", json={"matricula": "12345", "senha": "new-password"}
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "matricula": "12345",
+        "message": "Student registered successfully.",
+    }
+
+
+def test_register_duplicate_matricula(client, monkeypatch):
+    connection = _mock_connection(None)
+    connection.cursor.return_value.execute.side_effect = psycopg2.errors.UniqueViolation
+    monkeypatch.setattr(db, "get_connection", lambda: connection)
+
+    response = client.post(
+        "/api/register", json={"matricula": "12345", "senha": "new-password"}
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Matrícula já cadastrada."
+
+
+def test_register_missing_fields(client):
+    response = client.post("/api/register", json={"matricula": "12345"})
 
     assert response.status_code == 422
