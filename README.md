@@ -13,7 +13,12 @@ que consome esta API fica em um repositório separado (`pgl_auth`).
   em `pyproject.toml` aponta para cá). Só monta a `FastAPI app` a partir de `core/app.py`;
   não tem lógica de negócio.
 - `core/` — lógica da aplicação, organizada por responsabilidade:
-  - `core/app.py` — factory `create_app()` que instancia a `FastAPI` e registra as rotas.
+  - `core/app.py` — factory `create_app()` que instancia a `FastAPI`, registra as rotas e,
+    se `ALLOWED_FRONTEND_ORIGINS` estiver configurada, habilita CORS (só `POST`) para essas
+    origens — necessário para que uma página como `pgl-registry-front` chame `/api/register`
+    diretamente do navegador via `fetch()`. Sem essa variável, a API não é alcançável por
+    nenhuma página web (o `pgl_auth` e o `pgl_proxy` chamam esta API do lado do servidor,
+    onde CORS não se aplica).
   - `core/routers/auth.py` — endpoints de autenticação:
     - `POST /api/login` — valida matrícula/senha (hash bcrypt) contra `pgl_auth.students`
       no Postgres (Neon) e assina o JWT.
@@ -51,6 +56,10 @@ fastapi dev api/application.py
 3. Configure as variáveis de ambiente do projeto:
    - `NEON_DATABASE_URL`
    - `JWT_SECRET_KEY`
+   - `ALLOWED_FRONTEND_ORIGINS` — opcional, origens (separadas por vírgula) autorizadas a
+     chamar `/api/register` via CORS a partir do navegador, ex.
+     `https://pgl-registry-front.vercel.app`. Deixe sem definir para manter a API
+     inacessível a partir de qualquer página web.
 4. Deploy automático a cada push — os endpoints ficam em
    `https://<projeto>.vercel.app/api/login` e `https://<projeto>.vercel.app/api/register`.
 5. Depois do primeiro deploy, atualize `DEFAULT_API_URL` em `pgl_auth/src/pgl_auth/client.py`
