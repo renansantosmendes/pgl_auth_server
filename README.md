@@ -1,8 +1,8 @@
 # pgl_auth_server
 
-API serverless (FastAPI) hospedada no Vercel que autentica alunos (matrícula + senha) e
-emite um token JWT de curta duração (4 horas) para acesso ao proxy dos modelos de IA da
-disciplina.
+API serverless (FastAPI) hospedada no Vercel que autentica alunos (matrícula/registration_number
++ senha) e emite um token JWT de curta duração (4 horas) para acesso ao proxy dos modelos de IA
+da disciplina. Também permite que professores redefinam a senha de um aluno.
 
 Este é o servidor. O pacote Python instalado pelos alunos (`pgl-auth`, publicado no PyPI)
 que consome esta API fica em um repositório separado (`pgl_auth`).
@@ -20,12 +20,19 @@ que consome esta API fica em um repositório separado (`pgl_auth`).
     nenhuma página web (o `pgl_auth` e o `pgl_proxy` chamam esta API do lado do servidor,
     onde CORS não se aplica).
   - `core/routers/auth.py` — endpoints de autenticação:
-    - `POST /api/login` — valida matrícula/senha (hash bcrypt) contra `pgl_auth.students`
-      no Postgres (Neon) e assina o JWT.
-    - `POST /api/register` — cadastra um novo aluno (matrícula + senha) em
-      `pgl_auth.students`, com a senha já hasheada em bcrypt. Só permite o cadastro se a
-      matrícula existir e estiver ativa em `pgl_proxy.students` (`403` caso contrário).
-      Retorna `409` se a matrícula já existir em `pgl_auth.students`.
+    - `POST /api/login` — valida registration_number/senha (hash bcrypt) contra
+      `pgl_auth.students` no Postgres (Neon) e assina o JWT.
+    - `POST /api/register` — cadastra um novo aluno (registration_number + senha) em
+      `pgl_auth.students`, com a senha já hasheada em bcrypt. Só permite o cadastro se o
+      registration_number existir e estiver ativo em `pgl_proxy.students` (`403` caso
+      contrário). Retorna `409` se ele já existir em `pgl_auth.students`.
+    - `POST /api/reset-password` — deixa um **professor** definir/redefinir a senha de um
+      aluno. Exige um JWT válido no `Authorization: Bearer <token>` (o professor loga pelo
+      mesmo `/api/login` que os alunos); o endpoint confirma `role = 'Professor'` e
+      `is_active = true` para o registration_number do token em `pgl_proxy.students`
+      (`403` caso contrário) e então faz upsert do hash da nova senha em
+      `pgl_auth.students` — funciona tanto para redefinir quanto para cadastrar a
+      primeira senha de um aluno em nome dele.
   - `core/db.py` — conexão com o Postgres (`get_connection()`).
   - `core/security.py` — hashing/verificação de senha (bcrypt) e o fingerprint SHA-256
     usado só para correlacionar tentativas nos logs, sem nunca expor a senha.
@@ -61,7 +68,8 @@ fastapi dev api/application.py
      `https://pgl-registry-front.vercel.app`. Deixe sem definir para manter a API
      inacessível a partir de qualquer página web.
 4. Deploy automático a cada push — os endpoints ficam em
-   `https://<projeto>.vercel.app/api/login` e `https://<projeto>.vercel.app/api/register`.
+   `https://<projeto>.vercel.app/api/login`, `https://<projeto>.vercel.app/api/register` e
+   `https://<projeto>.vercel.app/api/reset-password`.
 5. Depois do primeiro deploy, atualize `DEFAULT_API_URL` em `pgl_auth/src/pgl_auth/client.py`
    (no outro repositório) com essa URL, ou oriente os alunos a definir a variável de
    ambiente `PGL_AUTH_API_URL`.
