@@ -1,5 +1,7 @@
 # pgl_auth_server
 
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi&logoColor=white) ![pytest](https://img.shields.io/badge/pytest-8.3.3-0A9EDC?logo=pytest&logoColor=white) ![Pydantic](https://img.shields.io/badge/Pydantic-2.9.2-E92063?logo=pydantic&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-2.9.9-4169E1?logo=postgresql&logoColor=white) ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI-2088FF?logo=githubactions&logoColor=white)
+
 API serverless (FastAPI) hospedada no Vercel que autentica alunos (matrícula/registration_number
 + senha) e emite um token JWT de curta duração (4 horas) para acesso ao proxy dos modelos de IA
 da disciplina. Também permite que professores redefinam a senha de um aluno.
@@ -83,3 +85,13 @@ O schema `pgl_auth` (tabela `students`) e o schema `pgl_proxy` (tabela `students
 guarda quem está matriculado/ativo) são provisionados a partir do repositório `pgl_auth`
 (`db/migrate.py`). O cadastro de alunos (`db/create_student.py` naquele repositório, ou
 `POST /api/register` aqui) escreve em `pgl_auth.students`.
+
+## Architecture overview
+
+```mermaid
+flowchart LR
+    repo["pgl_auth_server"]
+    repo --> d0["api/"]
+    repo --> d1["core/"]
+    repo --> d2["tests/"]
+```
