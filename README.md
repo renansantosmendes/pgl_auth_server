@@ -1,97 +1,141 @@
 # pgl_auth_server
 
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi&logoColor=white) ![pytest](https://img.shields.io/badge/pytest-8.3.3-0A9EDC?logo=pytest&logoColor=white) ![Pydantic](https://img.shields.io/badge/Pydantic-2.9.2-E92063?logo=pydantic&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-2.9.9-4169E1?logo=postgresql&logoColor=white) ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI-2088FF?logo=githubactions&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi&logoColor=white) ![Pydantic](https://img.shields.io/badge/Pydantic-2.9.2-E92063?logo=pydantic&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-psycopg2-4169E1?logo=postgresql&logoColor=white) ![Resend](https://img.shields.io/badge/Resend-2.56.2-000000) ![pytest](https://img.shields.io/badge/pytest-8.3.3-0A9EDC?logo=pytest&logoColor=white) ![Vercel](https://img.shields.io/badge/Vercel-deploy-000000?logo=vercel&logoColor=white)
 
-API serverless (FastAPI) hospedada no Vercel que autentica alunos (matrícula/registration_number
-+ senha) e emite um token JWT de curta duração (4 horas) para acesso ao proxy dos modelos de IA
-da disciplina. Também permite que professores redefinam a senha de um aluno.
+API serverless (FastAPI) hospedada no Vercel. Autentica alunos por matrícula e senha,
+emite um token JWT de 4 horas para o proxy dos modelos de IA, e oferece:
 
-Este é o servidor. O pacote Python instalado pelos alunos (`pgl-auth`, publicado no PyPI)
-que consome esta API fica em um repositório separado (`pgl_auth`).
+- cadastro com matrícula numérica, e-mail institucional e senha forte;
+- troca de senha pelo aluno, autenticado com a senha atual;
+- redefinição de senha por código enviado ao e-mail institucional;
+- bloqueio temporário após tentativas incorretas;
+- revogação de sessões (logout e troca de senha);
+- painel de professor: listar alunos, bloquear/desbloquear contas e enviar convites.
+
+O pacote que os alunos instalam (`pgl-auth`) fica no repositório `pgl_auth`.
+
+## Rotas
+
+| Método e caminho | Quem usa | Descrição |
+| --- | --- | --- |
+| `POST /api/login` | aluno, professor | Valida matrícula e senha e devolve o token. |
+| `POST /api/register` | aluno | Primeiro cadastro da senha. Exige matrícula, e-mail, senha e confirmação. |
+| `POST /api/logout` | aluno | Revoga todos os tokens do aluno. |
+| `POST /api/password/change` | aluno (token) | Troca a senha informando a senha atual. Devolve um token novo. |
+| `POST /api/password/forgot` | aluno | Envia um código de 6 dígitos ao e-mail institucional. Sempre responde `202`. |
+| `POST /api/password/reset` | aluno | Define a nova senha com o código recebido. |
+| `POST /api/reset-password` | professor (token) | Define ou redefine a senha de um aluno. |
+| `GET /api/professor/students` | professor (token) | Lista a turma com o estado de cada conta. |
+| `POST /api/professor/students/{matricula}/status` | professor (token) | Bloqueia ou desbloqueia a conta de um aluno. |
+| `POST /api/professor/invitations` | professor (token) | Envia código de criação de senha a alunos sem senha. |
+
+## Regras
+
+- **Matrícula:** só dígitos, entre 5 e 20.
+- **E-mail:** o cadastro só aceita o e-mail que está no roster da disciplina
+  (`pgl_proxy.students.login_id`), sem diferenciar maiúsculas.
+- **Senha nova:** no mínimo 10 caracteres, no máximo 72 bytes, com maiúscula, minúscula,
+  número e símbolo. Não pode conter a matrícula nem estar numa lista de senhas comuns.
+  Senhas criadas antes dessas regras continuam válidas no login.
+- **Código de redefinição:** 6 dígitos, válido por 15 minutos, 5 tentativas erradas e
+  então descartado. Novo envio só depois de 60 segundos. O código é guardado apenas como
+  HMAC-SHA256 com o `JWT_SECRET_KEY`.
+- **Bloqueio:** 5 falhas seguidas de login ou de troca de senha bloqueiam a conta por 15
+  minutos (`429`).
+- **Sessões:** cada token traz uma versão (`ver`). Logout, troca e redefinição de senha
+  incrementam a versão, e tokens antigos passam a ser rejeitados.
+
+## Fluxo de redefinição de senha
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Aluno (pgl_auth)
+    participant S as pgl_auth_server
+    participant DB as Postgres (Neon)
+    participant M as Resend
+    A->>S: POST /api/password/forgot {matricula}
+    S->>DB: confere matrícula ativa e login_id com e-mail
+    S->>DB: grava HMAC do código (expira em 15 min)
+    S->>M: envia código para o e-mail institucional
+    S-->>A: 202 (mesma resposta existia ou não a matrícula)
+    A->>S: POST /api/password/reset {matricula, codigo, nova_senha}
+    S->>S: valida a força da senha
+    S->>DB: confere HMAC, tentativas e validade
+    S->>DB: troca o hash e incrementa token_version
+    S-->>A: 200
+```
 
 ## Estrutura
 
-- `api/application.py` — entrypoint serverless usado pela Vercel (`[tool.vercel] entrypoint`
-  em `pyproject.toml` aponta para cá). Só monta a `FastAPI app` a partir de `core/app.py`;
-  não tem lógica de negócio.
-- `core/` — lógica da aplicação, organizada por responsabilidade:
-  - `core/app.py` — factory `create_app()` que instancia a `FastAPI`, registra as rotas e,
-    se `ALLOWED_FRONTEND_ORIGINS` estiver configurada, habilita CORS (só `POST`) para essas
-    origens — necessário para que uma página como `pgl-registry-front` chame `/api/register`
-    diretamente do navegador via `fetch()`. Sem essa variável, a API não é alcançável por
-    nenhuma página web (o `pgl_auth` e o `pgl_proxy` chamam esta API do lado do servidor,
-    onde CORS não se aplica).
-  - `core/routers/auth.py` — endpoints de autenticação:
-    - `POST /api/login` — valida registration_number/senha (hash bcrypt) contra
-      `pgl_auth.students` no Postgres (Neon) e assina o JWT.
-    - `POST /api/register` — cadastra um novo aluno (registration_number + senha) em
-      `pgl_auth.students`, com a senha já hasheada em bcrypt. Só permite o cadastro se o
-      registration_number existir e estiver ativo em `pgl_proxy.students` (`403` caso
-      contrário). Retorna `409` se ele já existir em `pgl_auth.students`.
-    - `POST /api/reset-password` — deixa um **professor** definir/redefinir a senha de um
-      aluno. Exige um JWT válido no `Authorization: Bearer <token>` (o professor loga pelo
-      mesmo `/api/login` que os alunos); o endpoint confirma `role = 'Professor'` e
-      `is_active = true` para o registration_number do token em `pgl_proxy.students`
-      (`403` caso contrário) e então faz upsert do hash da nova senha em
-      `pgl_auth.students` — funciona tanto para redefinir quanto para cadastrar a
-      primeira senha de um aluno em nome dele.
-  - `core/db.py` — conexão com o Postgres (`get_connection()`).
-  - `core/security.py` — hashing/verificação de senha (bcrypt) e o fingerprint SHA-256
-    usado só para correlacionar tentativas nos logs, sem nunca expor a senha.
-  - `core/config.py` — configuração de logging e constantes (`TOKEN_TTL`).
-- `requirements.txt` — dependências da função (fastapi, psycopg2-binary, bcrypt, PyJWT, pydantic).
-- `pyproject.toml` — **não é o pacote PyPI**. Declara `[tool.vercel] entrypoint` (para a
-  Vercel achar `api/application.py`) e `[project]`/`dependencies`, que é a fonte de verdade
-  das dependências no deploy: o build da Vercel usa `uv` e falha com `No project table found`
-  se o `pyproject.toml` existir sem uma tabela `[project]`. `requirements.txt` e
-  `requirements-dev.txt` existem só para desenvolvimento local/CI e ficam de fora do bundle
-  (`.vercelignore`) para não conflitar com o `pyproject.toml` durante o `uv lock`.
-- `uv.lock` — lockfile commitado para builds determinísticos na Vercel. Regenere com
-  `uv lock` sempre que alterar `dependencies` em `pyproject.toml`.
+- `api/application.py` — entrypoint da Vercel (`[tool.vercel] entrypoint`).
+- `core/app.py` — monta a `FastAPI` com os três routers e o CORS.
+- `core/routers/auth.py` — login, cadastro, logout e troca de senha.
+- `core/routers/password.py` — esqueci a senha e redefinição por código.
+- `core/routers/professor.py` — redefinição pelo professor, turma e convites.
+- `core/validation.py` — regras de matrícula, e-mail e senha.
+- `core/security.py` — bcrypt, geração e verificação de códigos.
+- `core/repository.py` — todas as consultas SQL.
+- `core/auth_tokens.py` — emissão e verificação de tokens de aluno e professor.
+- `core/reset_flow.py` — emissão de código com intervalo de reenvio.
+- `core/mailer.py` e `core/messages.py` — envio e texto dos e-mails.
+- `db/migrations/002_account_security.sql` — tabelas e colunas novas.
+
+## Variáveis de ambiente
+
+| Variável | Obrigatória | Descrição |
+| --- | --- | --- |
+| `NEON_DATABASE_URL` | sim | Conexão com o Postgres. |
+| `JWT_SECRET_KEY` | sim | Segredo para assinar tokens e códigos. |
+| `RESEND_API_KEY` | sim para e-mails | Chave da API do Resend. |
+| `RESEND_FROM` | não | Remetente. Padrão: `noreply@synapseaisolutions.com`. O domínio precisa estar verificado no Resend. |
+| `ALLOWED_FRONTEND_ORIGINS` | não | Origens liberadas para CORS, separadas por vírgula. |
+| `LOG_LEVEL` | não | Nível de log. Padrão: `INFO`. |
 
 ## Rodando localmente
 
 ```bash
-pip install -r requirements.txt fastapi[standard]  # uvicorn vem com o extra "standard"
-cp .env.example .env   # preencha NEON_DATABASE_URL e JWT_SECRET_KEY
-fastapi dev api/application.py
+uv sync
+cp .env.example .env   # preencha as variáveis acima
+uv run fastapi dev api/application.py
 ```
 
-## Deploy no Vercel
+Testes:
 
-1. Importe este repositório no Vercel (Project → Add New → Project).
-2. **Não precisa mexer em Root Directory** — este repositório já é só a API, sem nenhum
-   outro `pyproject.toml`/pacote competindo por atenção.
-3. Configure as variáveis de ambiente do projeto:
-   - `NEON_DATABASE_URL`
-   - `JWT_SECRET_KEY`
-   - `ALLOWED_FRONTEND_ORIGINS` — opcional, origens (separadas por vírgula) autorizadas a
-     chamar `/api/register` via CORS a partir do navegador, ex.
-     `https://pgl-registry-front.vercel.app`. Deixe sem definir para manter a API
-     inacessível a partir de qualquer página web.
-4. Deploy automático a cada push — os endpoints ficam em
-   `https://<projeto>.vercel.app/api/login`, `https://<projeto>.vercel.app/api/register` e
-   `https://<projeto>.vercel.app/api/reset-password`.
-5. Depois do primeiro deploy, atualize `DEFAULT_API_URL` em `pgl_auth/src/pgl_auth/client.py`
-   (no outro repositório) com essa URL, ou oriente os alunos a definir a variável de
-   ambiente `PGL_AUTH_API_URL`.
+```bash
+uv run pytest -q
+```
 
-Não é preciso `vercel.json`: declarar `runtime` manualmente lá costuma quebrar com
-"Function Runtimes must have a valid version" se a versão não for pinada.
+Os testes não acessam o banco nem enviam e-mails: usam um fake de banco e um
+substituto do envio.
 
-## Banco de dados
+## Migração do banco
 
-O schema `pgl_auth` (tabela `students`) e o schema `pgl_proxy` (tabela `students`, que
-guarda quem está matriculado/ativo) são provisionados a partir do repositório `pgl_auth`
-(`db/migrate.py`). O cadastro de alunos (`db/create_student.py` naquele repositório, ou
-`POST /api/register` aqui) escreve em `pgl_auth.students`.
+Antes de publicar esta versão, rode uma vez no Neon:
+
+```bash
+psql "$NEON_DATABASE_URL" -f db/migrations/002_account_security.sql
+```
+
+O script é idempotente. Ele adiciona `token_version` em `pgl_auth.students` e cria
+`pgl_auth.login_attempts`, `pgl_auth.password_reset_codes` e `pgl_auth.audit_log`.
+
+## Deploy
+
+1. Rode a migração acima.
+2. Configure no projeto da Vercel as variáveis da tabela, incluindo `RESEND_API_KEY`.
+3. Faça o deploy. Os endpoints ficam em `https://<projeto>.vercel.app/api/...`.
+4. Só depois publique a nova versão do pacote `pgl-auth`, porque versões antigas do
+   pacote enviam senhas que a nova validação rejeita.
 
 ## Architecture overview
 
 ```mermaid
 flowchart LR
-    repo["pgl_auth_server"]
-    repo --> d0["api/"]
-    repo --> d1["core/"]
-    repo --> d2["tests/"]
+    client["pgl_auth (cliente)<br/>ou pgl-registry-front"] -->|HTTPS| api["FastAPI<br/>api/application.py"]
+    api --> routers["routers<br/>auth, password, professor"]
+    routers --> repo["repository.py"]
+    repo --> neon[("Postgres (Neon)<br/>pgl_auth e pgl_proxy")]
+    routers --> mailer["mailer.py"]
+    mailer --> resend["Resend API"]
 ```

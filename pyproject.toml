@@ -1,6 +1,6 @@
 [project]
 name = "pgl-auth-server"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi==0.115.0",
@@ -8,6 +8,7 @@ dependencies = [
     "bcrypt==4.2.0",
     "PyJWT==2.9.0",
     "pydantic==2.9.2",
+    "resend==2.56.2",
 ]
 
 [tool.vercel]
