@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from core import auth_tokens, db, messages, repository, reset_flow, security, validation
 from core.schemas import (
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api", tags=["professor"])
 @router.post("/reset-password", response_model=ResetPasswordResponse)
 def reset_password(
     payload: ResetPasswordRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Depends(auth_tokens.bearer_authorization),
 ) -> ResetPasswordResponse:
     """Let a professor set or replace the password of a student.
 
@@ -77,7 +77,7 @@ def reset_password(
 
 @router.get("/professor/students", response_model=StudentListResponse)
 def list_students(
-    authorization: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Depends(auth_tokens.bearer_authorization),
 ) -> StudentListResponse:
     """List every roster member with the state of their password account.
 
@@ -114,7 +114,7 @@ def list_students(
 def set_student_status(
     registration_number: str,
     payload: StudentStatusRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Depends(auth_tokens.bearer_authorization),
 ) -> dict:
     """Block or unblock the password login of a student.
 
@@ -164,7 +164,7 @@ def set_student_status(
 @router.post("/professor/invitations", response_model=InvitationResponse)
 def send_invitations(
     payload: InvitationRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Depends(auth_tokens.bearer_authorization),
 ) -> InvitationResponse:
     """Invite enrolled students who have no password yet.
 

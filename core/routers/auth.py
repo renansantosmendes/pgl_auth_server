@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg2
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from core import auth_tokens, db, repository, security, validation
 from core.config import TOKEN_TTL
@@ -183,7 +183,7 @@ def register(payload: RegisterRequest) -> RegisterResponse:
 
 
 @router.post("/logout", response_model=MessageResponse)
-def logout(authorization: Optional[str] = Header(default=None)) -> MessageResponse:
+def logout(authorization: Optional[str] = Depends(auth_tokens.bearer_authorization)) -> MessageResponse:
     """Revoke every token issued so far for the calling student.
 
     Parameters
@@ -210,7 +210,7 @@ def logout(authorization: Optional[str] = Header(default=None)) -> MessageRespon
 @router.post("/password/change", response_model=LoginResponse)
 def change_password(
     payload: ChangePasswordRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Depends(auth_tokens.bearer_authorization),
 ) -> LoginResponse:
     """Replace the password of the calling student.
 
