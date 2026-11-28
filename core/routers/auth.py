@@ -193,6 +193,10 @@ def register(payload: RegisterRequest) -> MessageResponse:
                 security.hash_confirmation_token(token),
                 now + CONFIRMATION_TTL,
             )
+            logger.info(
+                "Registration pending | registration_number=%s",
+                _mask(registration_number),
+            )
             subject, text = messages.registration_confirmation_message(
                 build_confirmation_link(token)
             )
@@ -212,6 +216,22 @@ def register(payload: RegisterRequest) -> MessageResponse:
                 "confirmation e-mail sent",
             )
     return MessageResponse(message=CONFIRMATION_SENT_MESSAGE)
+
+
+def _mask(registration_number: str) -> str:
+    """Hide all but the last two digits of a registration number for logs.
+
+    Parameters
+    ----------
+    registration_number : str
+        Registration number to mask.
+
+    Returns
+    -------
+    str
+        Masked value, for example ``*****01``.
+    """
+    return "*" * max(len(registration_number) - 2, 0) + registration_number[-2:]
 
 
 def build_confirmation_link(token: str) -> str:
@@ -268,6 +288,11 @@ def confirm_registration(payload: ConfirmRegistrationRequest) -> RegisterRespons
                     outcome = _create_account(cur, registration_number, password_hash)
                 repository.delete_pending_registration(cur, registration_number)
 
+    logger.info(
+        "Registration confirmation | outcome=%s registration_number=%s",
+        outcome,
+        _mask(registration_number) if registration_number else "-",
+    )
     if outcome == "created":
         return RegisterResponse(registration_number=registration_number)
     if outcome == "expired":
