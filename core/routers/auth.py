@@ -2,13 +2,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-import psycopg2
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from core import auth_tokens, db, repository, security, validation
-from core.config import TOKEN_TTL
+from core import auth_tokens, db, mailer, messages, repository, security, validation
+from core.config import CONFIRMATION_TTL, FRONTEND_BASE_URL, TOKEN_TTL
 from core.schemas import (
     ChangePasswordRequest,
+    ConfirmRegistrationRequest,
     LoginRequest,
     LoginResponse,
     MessageResponse,
@@ -23,6 +23,12 @@ router = APIRouter(prefix="/api", tags=["auth"])
 INVALID_CREDENTIALS = "Matrícula ou senha inválidos."
 LOCKED_MESSAGE = "Muitas tentativas incorretas. Tente novamente mais tarde."
 INVALID_DATA_MESSAGE = "Dados inválidos para a operação."
+CONFIRMATION_SENT_MESSAGE = (
+    "Enviamos um link de confirmação para o seu e-mail institucional. "
+    "Abra o link em até 10 minutos para concluir o cadastro."
+)
+INVALID_LINK_MESSAGE = "Link inválido ou já utilizado."
+EXPIRED_LINK_MESSAGE = "Link expirado. Faça o cadastro novamente."
 
 
 def raise_validation_error(errors: list[str]) -> None:
@@ -124,13 +130,15 @@ def login(payload: LoginRequest) -> LoginResponse:
     )
 
 
-@router.post("/register", response_model=RegisterResponse, status_code=201)
-def register(payload: RegisterRequest) -> RegisterResponse:
-    """Create the password of an enrolled student for the first time.
+@router.post("/register", response_model=MessageResponse, status_code=202)
+def register(payload: RegisterRequest) -> MessageResponse:
+    """Start a registration and e-mail the confirmation link.
 
     Every field is mandatory: registration number, institutional e-mail,
     password and its confirmation. The e-mail must match the one on the
-    course roster, and the password must follow the strength rules.
+    course roster, and the password must follow the strength rules. No
+    account is created here: the account exists only after the student
+    opens the link, which is valid for ``CONFIRMATION_TTL``.
 
     Parameters
     ----------
@@ -139,25 +147,28 @@ def register(payload: RegisterRequest) -> RegisterResponse:
 
     Returns
     -------
-    RegisterResponse
-        Confirmation with the registration number.
+    MessageResponse
+        Instruction to open the link sent by e-mail.
 
     Raises
     ------
     HTTPException
         422 for invalid data, 403 when the student is not enrolled or the
-        e-mail does not match the roster, 409 when a password already exists.
+        e-mail does not match the roster, 409 when a password already exists,
+        503 when the confirmation e-mail cannot be sent.
     """
     registration_number = payload.registration_number
+    email = payload.email.strip()
     errors = validation.registration_number_problems(registration_number)
-    errors += validation.email_problems(payload.email)
+    errors += validation.email_problems(email)
     if payload.senha != payload.senha_confirmacao:
         errors.append("As senhas não coincidem.")
     errors += validation.password_problems(payload.senha, registration_number)
     if errors:
         raise_validation_error(errors)
 
-    password_hash = security.hash_password(payload.senha)
+    token = security.new_confirmation_token()
+    now = datetime.now(timezone.utc)
     with db.get_connection() as conn:
         with conn.cursor() as cur:
             enrollment = repository.find_enrollment(cur, registration_number)
@@ -166,20 +177,138 @@ def register(payload: RegisterRequest) -> RegisterResponse:
                     status_code=403,
                     detail="Matrícula não encontrada ou inativa na disciplina.",
                 )
-            roster_email = (enrollment[1] or "").strip().lower()
-            if roster_email != payload.email.strip().lower():
+            if (enrollment[1] or "").strip().lower() != email.lower():
                 raise HTTPException(
                     status_code=403,
                     detail="O e-mail informado não confere com o cadastro da disciplina.",
                 )
-            try:
-                repository.create_student(cur, registration_number, password_hash)
-            except psycopg2.errors.UniqueViolation:
+            if repository.find_auth_student(cur, registration_number) is not None:
                 raise HTTPException(status_code=409, detail="Matrícula já cadastrada.")
-            repository.record_audit_event(
-                cur, "register", registration_number, None, "password created"
+
+            repository.save_pending_registration(
+                cur,
+                registration_number,
+                email,
+                security.hash_password(payload.senha),
+                security.hash_confirmation_token(token),
+                now + CONFIRMATION_TTL,
             )
-    return RegisterResponse(registration_number=registration_number)
+            subject, text = messages.registration_confirmation_message(
+                build_confirmation_link(token)
+            )
+            try:
+                mailer.send_message(email, subject, text)
+            except Exception:
+                logger.exception("Could not send the registration confirmation e-mail.")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Não foi possível enviar o e-mail de confirmação. Tente novamente.",
+                )
+            repository.record_audit_event(
+                cur,
+                "registration_requested",
+                registration_number,
+                None,
+                "confirmation e-mail sent",
+            )
+    return MessageResponse(message=CONFIRMATION_SENT_MESSAGE)
+
+
+def build_confirmation_link(token: str) -> str:
+    """Build the link the student opens to confirm the registration.
+
+    Parameters
+    ----------
+    token : str
+        Confirmation token. It is URL-safe, so it needs no encoding.
+
+    Returns
+    -------
+    str
+        Address of the confirmation page of the frontend.
+    """
+    return f"{FRONTEND_BASE_URL}/confirmar?token={token}"
+
+
+@router.post("/register/confirm", response_model=RegisterResponse, status_code=201)
+def confirm_registration(payload: ConfirmRegistrationRequest) -> RegisterResponse:
+    """Create the account of a registration whose link was opened in time.
+
+    The pending request is removed whether the account is created or not,
+    so a link can be used only once and expired links are discarded.
+
+    Parameters
+    ----------
+    payload : ConfirmRegistrationRequest
+        Token copied from the confirmation link.
+
+    Returns
+    -------
+    RegisterResponse
+        Registration number of the new account.
+
+    Raises
+    ------
+    HTTPException
+        400 for an unknown, used or expired link, 403 when the student is no
+        longer enrolled, 409 when the account already exists.
+    """
+    now = datetime.now(timezone.utc)
+    token_hash = security.hash_confirmation_token(payload.token)
+    outcome = "invalid"
+    registration_number = ""
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            pending = repository.find_pending_registration(cur, token_hash)
+            if pending is not None:
+                registration_number, _, password_hash, expires_at = pending
+                if expires_at <= now:
+                    outcome = "expired"
+                else:
+                    outcome = _create_account(cur, registration_number, password_hash)
+                repository.delete_pending_registration(cur, registration_number)
+
+    if outcome == "created":
+        return RegisterResponse(registration_number=registration_number)
+    if outcome == "expired":
+        raise HTTPException(status_code=400, detail=EXPIRED_LINK_MESSAGE)
+    if outcome == "not_enrolled":
+        raise HTTPException(
+            status_code=403,
+            detail="Matrícula não encontrada ou inativa na disciplina.",
+        )
+    if outcome == "duplicate":
+        raise HTTPException(status_code=409, detail="Matrícula já cadastrada.")
+    raise HTTPException(status_code=400, detail=INVALID_LINK_MESSAGE)
+
+
+def _create_account(cursor, registration_number: str, password_hash: str) -> str:
+    """Insert the password account of a confirmed registration.
+
+    Parameters
+    ----------
+    cursor : Any
+        Open database cursor.
+    registration_number : str
+        Registration number that confirmed the e-mail.
+    password_hash : str
+        bcrypt hash stored when the registration was requested.
+
+    Returns
+    -------
+    str
+        ``created``, ``not_enrolled`` or ``duplicate``.
+    """
+    enrollment = repository.find_enrollment(cursor, registration_number)
+    if enrollment is None or not enrollment[0]:
+        return "not_enrolled"
+    if repository.find_auth_student(cursor, registration_number) is not None:
+        return "duplicate"
+    repository.create_student(cursor, registration_number, password_hash)
+    repository.record_audit_event(
+        cursor, "register_confirmed", registration_number, None, "account created"
+    )
+    return "created"
 
 
 @router.post("/logout", response_model=MessageResponse)

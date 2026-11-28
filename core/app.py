@@ -5,6 +5,7 @@ from core.config import ALLOWED_FRONTEND_ORIGINS
 from core.routers.auth import router as auth_router
 from core.routers.password import router as password_router
 from core.routers.professor import router as professor_router
+from core.routers.students import router as students_router
 from core.routers.token import router as token_router
 
 
@@ -25,12 +26,13 @@ def create_app() -> FastAPI:
     app.include_router(password_router)
     app.include_router(professor_router)
     app.include_router(token_router)
+    app.include_router(students_router)
 
     if ALLOWED_FRONTEND_ORIGINS:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=ALLOWED_FRONTEND_ORIGINS,
-            allow_methods=["GET", "POST"],
+            allow_methods=["GET", "POST", "DELETE"],
             allow_headers=["Content-Type", "Authorization"],
         )
 
