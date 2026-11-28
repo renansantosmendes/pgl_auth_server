@@ -451,3 +451,137 @@ def code_expiry(now: datetime) -> datetime:
         Expiration time of the code.
     """
     return now + RESET_CODE_TTL
+
+
+def save_pending_registration(
+    cursor,
+    registration_number: str,
+    email: str,
+    password_hash: str,
+    token_hash: str,
+    expires_at: datetime,
+) -> None:
+    """Store a registration that waits for its e-mail confirmation.
+
+    A newer request for the same registration number replaces the older one.
+
+    Parameters
+    ----------
+    cursor : Any
+        Open database cursor.
+    registration_number : str
+        Registration number that requested the account.
+    email : str
+        Institutional e-mail the confirmation was sent to.
+    password_hash : str
+        bcrypt hash of the chosen password.
+    token_hash : str
+        Digest of the confirmation token.
+    expires_at : datetime
+        Moment after which the link is no longer accepted.
+    """
+    cursor.execute(
+        "INSERT INTO pgl_auth.pending_registrations "
+        "(registration_number, email, password_hash, token_hash, expires_at) "
+        "VALUES (%s, %s, %s, %s, %s) "
+        "ON CONFLICT (registration_number) DO UPDATE SET "
+        "email = EXCLUDED.email, "
+        "password_hash = EXCLUDED.password_hash, "
+        "token_hash = EXCLUDED.token_hash, "
+        "expires_at = EXCLUDED.expires_at, "
+        "created_at = now()",
+        (registration_number, email, password_hash, token_hash, expires_at),
+    )
+
+
+def find_pending_registration(cursor, token_hash: str) -> Optional[tuple]:
+    """Find the pending registration that a confirmation token belongs to.
+
+    Parameters
+    ----------
+    cursor : Any
+        Open database cursor.
+    token_hash : str
+        Digest of the token received in the link.
+
+    Returns
+    -------
+    tuple | None
+        ``(registration_number, email, password_hash, expires_at)``, or None.
+    """
+    cursor.execute(
+        "SELECT registration_number, email, password_hash, expires_at "
+        "FROM pgl_auth.pending_registrations WHERE token_hash = %s",
+        (token_hash,),
+    )
+    return cursor.fetchone()
+
+
+def delete_pending_registration(cursor, registration_number: str) -> None:
+    """Remove a pending registration.
+
+    Parameters
+    ----------
+    cursor : Any
+        Open database cursor.
+    registration_number : str
+        Registration number whose pending request is removed.
+    """
+    cursor.execute(
+        "DELETE FROM pgl_auth.pending_registrations WHERE registration_number = %s",
+        (registration_number,),
+    )
+
+
+def find_student_detail(cursor, registration_number: str) -> Optional[tuple]:
+    """Read every column of a student for the professor CRUD screen.
+
+    The password hash is never read.
+
+    Parameters
+    ----------
+    cursor : Any
+        Open database cursor.
+    registration_number : str
+        Registration number of the roster member.
+
+    Returns
+    -------
+    tuple | None
+        Roster and account columns, or None when the student is not on the
+        roster.
+    """
+    cursor.execute(
+        "SELECT p.registration_number, a.id, a.is_active, a.token_version, "
+        "a.updated_at, p.full_name, p.login_id, p.sis_id, p.course, p.role, "
+        "p.is_active, p.last_modified, a.registration_number IS NOT NULL "
+        "FROM pgl_proxy.students p "
+        "LEFT JOIN pgl_auth.students a ON a.registration_number = p.registration_number "
+        "WHERE p.registration_number = %s",
+        (registration_number,),
+    )
+    return cursor.fetchone()
+
+
+def delete_student(cursor, registration_number: str) -> bool:
+    """Delete the password account of a student.
+
+    The roster entry is kept, so the student can register again later.
+
+    Parameters
+    ----------
+    cursor : Any
+        Open database cursor.
+    registration_number : str
+        Registration number of the account to delete.
+
+    Returns
+    -------
+    bool
+        True when an account was deleted.
+    """
+    cursor.execute(
+        "DELETE FROM pgl_auth.students WHERE registration_number = %s",
+        (registration_number,),
+    )
+    return cursor.rowcount > 0

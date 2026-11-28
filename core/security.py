@@ -121,3 +121,42 @@ def reset_code_matches(
     """
     computed = hash_reset_code(code, registration_number, secret)
     return hmac.compare_digest(computed, expected_hash)
+
+
+def new_confirmation_token() -> str:
+    """Create the random token carried by a registration confirmation link.
+
+    Returns
+    -------
+    str
+        URL-safe token with 256 bits of randomness.
+
+    Example
+    -------
+    >>> len(new_confirmation_token()) > 40
+    True
+    """
+    return secrets.token_urlsafe(32)
+
+
+def hash_confirmation_token(token: str) -> str:
+    """Compute the digest stored for a confirmation token.
+
+    Only the digest is stored, so a leaked table does not reveal the links.
+
+    Parameters
+    ----------
+    token : str
+        Token that was sent in the confirmation link.
+
+    Returns
+    -------
+    str
+        Hexadecimal SHA-256 digest of the token.
+
+    Example
+    -------
+    >>> len(hash_confirmation_token("abc")) == 64
+    True
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

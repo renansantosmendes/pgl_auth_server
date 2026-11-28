@@ -31,6 +31,10 @@ As rotas protegidas usam `Authorization: Bearer <token>`. No Swagger em `/docs`,
 | `POST /api/professor/students/{matricula}/status` | professor (token) | Bloqueia ou desbloqueia a conta de um aluno. |
 | `POST /api/professor/invitations` | professor (token) | Envia código de criação de senha a alunos sem senha. |
 | `GET /api/token/verify` | outros serviços (token) | Confirma um token e devolve `registration_number` e `role` (`student` ou `professor`). Usado pelo `a2a_server` para autorizar chamadas. |
+| `POST /api/register` | aluno | Inicia o cadastro. Envia um link de confirmação válido por 10 minutos e responde 202. A conta só é criada depois de confirmar. |
+| `POST /api/register/confirm` | aluno (link) | Cria a conta a partir do token do link. Cada link vale uma vez. |
+| `GET /api/professor/students/{matricula}` | professor (token) | Todas as colunas do aluno, sem o hash da senha. |
+| `DELETE /api/professor/students/{matricula}` | professor (token) | Remove a conta de acesso. O cadastro na disciplina é mantido. |
 
 ## Regras
 
@@ -82,7 +86,8 @@ sequenceDiagram
 - `core/auth_tokens.py` — emissão e verificação de tokens de aluno e professor.
 - `core/reset_flow.py` — emissão de código com intervalo de reenvio.
 - `core/mailer.py` e `core/messages.py` — envio e texto dos e-mails.
-- `db/migrations/002_account_security.sql` — tabelas e colunas novas.
+- `db/migrations/002_account_security.sql` — tabelas e colunas de segurança.
+- `db/migrations/003_registration_confirmation.sql` — tabela `pending_registrations`, usada pelo cadastro com confirmação por e-mail.
 
 ## Variáveis de ambiente
 
@@ -93,6 +98,7 @@ sequenceDiagram
 | `RESEND_API_KEY` | sim para e-mails | Chave da API do Resend. |
 | `RESEND_FROM` | não | Remetente. Padrão: `noreply@synapseaisolutions.com`. O domínio precisa estar verificado no Resend. |
 | `ALLOWED_FRONTEND_ORIGINS` | não | Origens liberadas para CORS, separadas por vírgula. |
+| `FRONTEND_BASE_URL` | sim para o cadastro | Endereço do frontend. O link de confirmação aponta para `<FRONTEND_BASE_URL>/confirmar?token=...`. |
 | `LOG_LEVEL` | não | Nível de log. Padrão: `INFO`. |
 
 ## Rodando localmente
