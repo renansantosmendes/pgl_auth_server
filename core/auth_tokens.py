@@ -198,3 +198,44 @@ def authenticate_professor(authorization: Optional[str]) -> str:
     if not is_active or (role or "").strip().lower() != "professor":
         raise HTTPException(status_code=403, detail=PROFESSOR_ONLY_MESSAGE)
     return registration_number
+
+
+def verify_identity(authorization: Optional[str]) -> dict:
+    """Describe the owner of a current bearer token.
+
+    Other services call this function through ``GET /api/token/verify`` to
+    learn who is calling them and whether that person is a professor. The
+    checks are the same as for the student routes: the token must be
+    current and the account must be active.
+
+    Parameters
+    ----------
+    authorization : str | None
+        Value of the ``Authorization`` header.
+
+    Returns
+    -------
+    dict
+        ``registration_number`` of the owner and ``role``, which is
+        ``professor`` or ``student``.
+
+    Raises
+    ------
+    HTTPException
+        401 for an invalid, expired or revoked token, 403 for an inactive
+        account.
+    """
+    claims = decode_bearer(authorization)
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            registration_number = student_from_claims(cur, claims)
+            role_row = repository.find_professor_role(cur, registration_number)
+    is_professor = (
+        role_row is not None
+        and bool(role_row[1])
+        and (role_row[0] or "").strip().lower() == "professor"
+    )
+    return {
+        "registration_number": registration_number,
+        "role": "professor" if is_professor else "student",
+    }

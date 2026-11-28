@@ -88,3 +88,18 @@ class InvitationSkip(BaseModel):
 class InvitationResponse(BaseModel):
     sent: List[str]
     skipped: List[InvitationSkip]
+
+
+class IdentityResponse(BaseModel):
+    """Identity of the owner of a bearer token.
+
+    Attributes
+    ----------
+    registration_number : str
+        Registration number of the owner.
+    role : str
+        ``professor`` or ``student``.
+    """
+
+    registration_number: str
+    role: str

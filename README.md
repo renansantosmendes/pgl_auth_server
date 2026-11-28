@@ -28,6 +28,7 @@ O pacote que os alunos instalam (`pgl-auth`) fica no repositório `pgl_auth`.
 | `GET /api/professor/students` | professor (token) | Lista a turma com o estado de cada conta. |
 | `POST /api/professor/students/{matricula}/status` | professor (token) | Bloqueia ou desbloqueia a conta de um aluno. |
 | `POST /api/professor/invitations` | professor (token) | Envia código de criação de senha a alunos sem senha. |
+| `GET /api/token/verify` | outros serviços (token) | Confirma um token e devolve `registration_number` e `role` (`student` ou `professor`). Usado pelo `a2a_server` para autorizar chamadas. |
 
 ## Regras
 
