@@ -16,6 +16,8 @@ O pacote que os alunos instalam (`pgl-auth`) fica no repositório `pgl_auth`.
 
 ## Rotas
 
+As rotas protegidas usam `Authorization: Bearer <token>`. No Swagger em `/docs`, clique em **Authorize** e informe só o token, sem a palavra `Bearer`.
+
 | Método e caminho | Quem usa | Descrição |
 | --- | --- | --- |
 | `POST /api/login` | aluno, professor | Valida matrícula e senha e devolve o token. |

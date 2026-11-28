@@ -3,13 +3,42 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import jwt
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core import db, repository
 from core.config import TOKEN_TTL
 
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="Token emitido pelo pgl_auth_server (POST /api/login).",
+)
+
 SESSION_EXPIRED_MESSAGE = "Sessão inválida. Faça login novamente."
 PROFESSOR_ONLY_MESSAGE = "Apenas professores podem executar esta ação."
+
+
+def bearer_authorization(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> Optional[str]:
+    """Read the bearer token sent by the client as an Authorization value.
+
+    FastAPI uses this dependency, so Swagger UI shows the Authorize button
+    and sends the token in the header.
+
+    Parameters
+    ----------
+    credentials : HTTPAuthorizationCredentials | None
+        Credentials parsed by the bearer scheme, or None when absent.
+
+    Returns
+    -------
+    str | None
+        Value for the Authorization header, or None when no token was sent.
+    """
+    if credentials is None:
+        return None
+    return f"Bearer {credentials.credentials}"
 
 
 def issue_token(registration_number: str, token_version: int) -> str:

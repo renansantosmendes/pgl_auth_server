@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends
 
 from core import auth_tokens
 from core.schemas import IdentityResponse
@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api", tags=["token"])
 
 @router.get("/token/verify", response_model=IdentityResponse)
 def verify_token(
-    authorization: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Depends(auth_tokens.bearer_authorization),
 ) -> IdentityResponse:
     """Confirm a bearer token and return who it belongs to.
 
