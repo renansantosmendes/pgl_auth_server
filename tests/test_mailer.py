@@ -36,3 +36,28 @@ def test_send_message_requires_the_api_key(monkeypatch):
 
     with pytest.raises(KeyError):
         mailer.send_message("aluno@pucminas.edu.br", "Oi", "Texto")
+
+
+def test_resend_failure_is_logged_and_raised(monkeypatch, caplog):
+    def failing_send(payload):
+        raise RuntimeError("invalid from address")
+
+    monkeypatch.setattr(resend.Emails, "send", failing_send)
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+
+    with caplog.at_level("ERROR", logger="pgl_auth_server.mailer"):
+        with pytest.raises(RuntimeError):
+            mailer.send_message("aluno@pucminas.edu.br", "Oi", "Texto")
+
+    assert "Resend rejected the e-mail" in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_missing_api_key_is_logged(monkeypatch, caplog):
+    monkeypatch.delenv("RESEND_API_KEY")
+
+    with caplog.at_level("ERROR", logger="pgl_auth_server.mailer"):
+        with pytest.raises(KeyError):
+            mailer.send_message("aluno@pucminas.edu.br", "Oi", "Texto")
+
+    assert "RESEND_API_KEY is not set" in caplog.text
